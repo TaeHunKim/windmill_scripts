@@ -8,6 +8,7 @@ import time
 from google.api_core.exceptions import ResourceExhausted
 import trafilatura
 from bs4 import BeautifulSoup
+from tavily import TavilyClient
 
 genai.configure(api_key=wmill.get_variable("u/rapaellk/googleai_api_key_free"))
 
@@ -149,7 +150,7 @@ def split_string_by_lines(long_string: str, max_length: int = 4096) -> list[str]
 class telegram(TypedDict):
     token: str
 
-def send_to_telegram(message: str, chat_id: int = int(wmill.get_variable("u/rapaellk/telegram_chat_id")), escaped: bool = False, token = wmill.get_resource("u/rapaellk/telegram_token_resource")):
+def send_to_telegram(message: str, chat_id: int = int(wmill.get_variable("u/rapaellk/telegram_chat_id")), escaped: bool = False, token = wmill.get_resource("u/rapaellk/telegram_token_resource"), reply_markup=None):
     telegram_url = f"https://api.telegram.org/bot{token['token']}/sendMessage"
     text = message
     if not escaped:
@@ -159,6 +160,8 @@ def send_to_telegram(message: str, chat_id: int = int(wmill.get_variable("u/rapa
         "text": text,
         "parse_mode":'MarkdownV2'
     }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     response = requests.post(telegram_url, data=payload)
     return response.json()
 
@@ -171,7 +174,20 @@ def send_long_message_to_telegram(message: str, chat_id: int = int(wmill.get_var
     for m in splitted_msg:
         send_to_telegram(m, chat_id, token=token)
 
-def get_content_from_link(url):
+def _get_content_from_link_tabily(url):
+    try:
+        tavily_client = TavilyClient(wmill.get_variable("u/rapaellk/TAVILY_API_KEY"))
+        response = tavily_client.extract(urls=url, extract_depth="advanced")
+        #print(response)
+        #return response
+        if not response.get("results"):
+            return None
+        return response["results"][0]["raw_content"]
+    except Exception as e:
+        print(e)
+        return None
+
+def _get_content_from_link_trafilatura(url):
     try:
         response = requests.get(
             url, 
@@ -200,6 +216,11 @@ def get_content_from_link(url):
         print(e)
         return None
 
+def get_content_from_link(url):
+    content = _get_content_from_link_trafilatura(url)
+    if not content or len(content) < 100:
+        return _get_content_from_link_tabily(url)
+
 def remove_html_tags_bs4(html_string):
     """
     Removes HTML tags from a string using BeautifulSoup and extracts pure text.
@@ -209,4 +230,4 @@ def remove_html_tags_bs4(html_string):
 
 
 def main(x: str):
-    return send_long_message_to_telegram(x)
+    return get_content_from_link(x)
